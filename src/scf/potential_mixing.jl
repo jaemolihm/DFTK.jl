@@ -1,4 +1,5 @@
 using Statistics
+using DoubleFloats
 
 # Quick and dirty Anderson implementation ... lacks important things like
 # control of the condition number of the anderson matrix.
@@ -49,6 +50,8 @@ function (anderson::AndersonAcceleration)(xₙ, αₙ, Pfxₙ)
     M = hcat(Pfxs...) .- vec(Pfxₙ)  # Mᵢⱼ = (Pfxⱼ)ᵢ - (Pfxₙ)ᵢ
     # We need to solve 0 = M' Pfxₙ + M'M βs <=> βs = - (M'M)⁻¹ M' Pfxₙ
 
+    M = Double64.(M)  # Convert to double-float
+
     # Ensure the condition number of M stays below maxcond, else prune the history
     Mfac = qr(M)
     while size(M, 2) > 1 && cond(Mfac.R) > anderson.maxcond
@@ -60,6 +63,7 @@ function (anderson::AndersonAcceleration)(xₙ, αₙ, Pfxₙ)
 
     xₙ₊₁ = vec(xₙ) .+ αₙ .* vec(Pfxₙ)
     βs   = -(Mfac \ vec(Pfxₙ))
+    βs   = Float64.(βs)  # convert back
     for (iβ, β) in enumerate(βs)
         xₙ₊₁ .+= β .* (xs[iβ] .- vec(xₙ) .+ αₙ .* (Pfxs[iβ] .- vec(Pfxₙ)))
     end
