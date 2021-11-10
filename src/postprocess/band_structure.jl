@@ -51,19 +51,7 @@ function high_symmetry_kpath(model; kline_density=40)
     # TODO Need to take care of time-reversal symmetry here!
     #      See https://github.com/JuliaMolSim/DFTK.jl/pull/496/files#r725203554
 
-    # Need to double the points whenever a new path starts
-    # (for temporary compatibility with pymatgen)
-    # TODO Remove this later
-    kcoords = empty(first(kinter.kpaths))
-    for kbranch in kinter.kpaths
-        idcs = findall(k -> any(sum(abs2, k - kcomp) < 1e-5
-                                for kcomp in values(kp.points)), kbranch)
-        @assert length(idcs) ≥ 2
-        idcs = idcs[2:end-1]  # Don't duplicate first and last
-        idcs = sort(append!(idcs, 1:length(kbranch)))
-        append!(kcoords, kbranch[idcs])
-    end
-
+    kcoords = vcat(kinter.kpaths...)
     T = eltype(kcoords[1])
     klabels = Dict{String,Vector{T}}(string(key) => val for (key, val) in kp.points)
     kpath   = [[string(el) for el in path] for path in kp.paths]
@@ -107,16 +95,18 @@ function split_into_branches(kcoords, data::Dict, klabels::Dict)
 
     branches = Any[(kindices = [0], kdistances=[0.0], ), ]
     for (ik, kcoord) in enumerate(kcoords)
+        next_kcoord = ik == length(kcoords) ? kcoords[end] : kcoords[ik + 1]
         previous_kcoord = ik == 1 ? kcoords[1] : kcoords[ik - 1]
-        if !isnothing(getlabel(kcoord)) && !isnothing(getlabel(previous_kcoord))
-            # New branch encountered
+        if isnothing(getlabel(previous_kcoord)) || isnothing(getlabel(kcoord))
+            # This k point is on the current branch, add to the current branch.
+            distance = branches[end].kdistances[end] + norm(kcoord - kcoords[ik - 1])
+            push!(branches[end].kindices, ik)
+            push!(branches[end].kdistances, distance)
+        end
+        if !isnothing(getlabel(kcoord)) && isnothing(getlabel(next_kcoord))
+            # This k point starts a new branch.
             previous_distance = branches[end].kdistances[end]
             push!(branches, (kindices=[ik], kdistances=[previous_distance]))
-        else
-            # Keep adding to current branch
-            distance = branches[end].kdistances[end] + norm(kcoord - kcoords[ik - 1])
-            push!(branches[end].kdistances, distance)
-            push!(branches[end].kindices, ik)
         end
     end
 
@@ -155,6 +145,7 @@ function prepare_band_data(band_data; datakeys=[:λ, :λerror],
     end
     @assert !isnothing(n_bands)
     branches = split_into_branches(kcoords_cart, data, klabels_cart)
+    @assert length(branches) > 0 "No k points in the path. Increase kline_density"
 
     tick_labels    = String[branches[1].klabels[1]]
     tick_distances = Float64[branches[1].kdistances[1]]
