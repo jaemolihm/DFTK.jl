@@ -74,3 +74,42 @@ end
         end
     end
 end
+@testitem "Matrix products with a Dual scaling factor" #=
+    =#    tags=[:dont_test_mpi, :minimal] setup=[ForwardDiffWrappers] begin
+    using DFTK
+    using ForwardDiff
+    using LinearAlgebra
+    using Random
+
+    # LinearAlgebra turns γ * A * B into mul!(C, A, B, γ, false), so the scaling factor of
+    # the BLAS-dispatched Dual matrix product can itself be a Dual.
+    for T in (Float64, ComplexF64)
+        A = randn(Xoshiro(1), T, 4, 3)
+        B = randn(Xoshiro(2), T, 3, 5)
+        f(t) = real(sum((1 + t) * (A .* (1 + 2t)) * B))  # = (1 + t)(1 + 2t) sum(A * B)
+        g(t) = real(sum((1 + t) * (A .* (1 + 2t)) * (B .* (1 - t))))
+        @test ForwardDiffWrappers.tagged_derivative(f, 0.0) ≈ 3 * real(sum(A * B))
+        @test ForwardDiffWrappers.tagged_derivative(g, 0.0) ≈ 2 * real(sum(A * B))
+    end
+end
+@testitem "Derivative of matrix functions with degenerate eigenvalues" #=
+    =#    tags=[:dont_test_mpi, :minimal] setup=[ForwardDiffWrappers] begin
+    using DFTK
+    using DFTK: matrix_function, invsqrt
+    using LinearAlgebra
+    using Random
+
+    # Eigenvalues (2, 2, 3) in a random basis. ForwardDiff's eigen rule divides by
+    # eigenvalue differences and gives NaN here; the Dual overload of matrix_function
+    # must not.
+    U = Matrix(qr(randn(Xoshiro(1), ComplexF64, 3, 3)).Q)
+    A = U * Diagonal([2.0, 2.0, 3.0]) * U'
+    δA = Hermitian(randn(Xoshiro(2), ComplexF64, 3, 3))
+    # invsqrt uses its exact divided difference, exp the generic one from ForwardDiff
+    for f in (invsqrt, exp)
+        fA(t) = matrix_function(f, Hermitian(A + t * δA))
+        h = 1e-5
+        reference = (fA(h) - fA(-h)) / 2h
+        @test ForwardDiffWrappers.tagged_derivative(fA, 0.0) ≈ reference atol=1e-8
+    end
+end

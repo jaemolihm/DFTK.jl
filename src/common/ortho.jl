@@ -8,11 +8,6 @@
     end
 end
 
-@timing function ortho_lowdin(φk::AbstractArray{T}) where {T}
-    evals, evecs = eigen(Hermitian(φk' * φk))
-    # Check for linear dependence: eigenvalues close to zero
-    @assert minimum(abs, evals) > eps(real(T)) * maximum(abs, evals) 
-    ihS = evecs * Diagonal(evals .^ (-0.5)) * evecs'
-    φk * ihS
+@timing function ortho_lowdin(φk::AbstractArray)
+    φk * matrix_function(invsqrt, Hermitian(φk' * φk))
 end
-

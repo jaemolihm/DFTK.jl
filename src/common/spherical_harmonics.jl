@@ -79,10 +79,12 @@ function wigner_d_matrix(l::Integer, Wcart::AbstractMatrix{T}) where {T}
     end
     rng = Xoshiro(1234)
     neq = 2l+2 # We need at least 2l+1 equations, we add one for numerical stability
+    # The sample points r are fixed numbers, not a function of Wcart, so they are drawn in
+    # the value type even if Wcart holds Duals (e.g. for stresses): only B carries derivatives
     B = Matrix{T}(undef, 2l+1, neq)
-    A = Matrix{T}(undef, 2l+1, neq)
+    A = Matrix{value_type(T)}(undef, 2l+1, neq)
     for n in 1:neq
-        r = rand(rng, T, 3)
+        r = rand(rng, value_type(T), 3)
         r = r / norm(r)
         r0 =  Wcart * r
         for m in -l:l
