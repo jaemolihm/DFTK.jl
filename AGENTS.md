@@ -488,12 +488,8 @@ names suggest.
 - `dmft` (tracks `origin/dmft`) collects all our local work: `upstream/master` plus every
   feature branch merged in (currently `hubbard-forces` = PR #1394 and upstream's
   `hubbard-gdensity`). DFTKEmbedding.jl and modest_dmft use DFTK from this branch.
-- Merge-based, never rebased: new work goes on a topic branch off `upstream/master` (one
-  branch per upstream PR, pushed to `origin`, PR opened against `JuliaMolSim:master`), then
-  that branch is merged into `dmft`. Review fixes go on the topic branch and are merged into
-  `dmft` again. To update, merge `upstream/master` into `dmft`. Never rebase or force-push
-  `dmft`; topic branches may be rebased/force-pushed as their PR requires.
-- Work that is not meant for upstream may be committed directly on `dmft`.
-- Do not commit `dmft`-only changes (this section included) on a topic branch or `master`.
+- New features go on a topic branch off `dmft`, which is then merged into `dmft`. To update,
+  merge `upstream/master` into `dmft`. Never rebase or force-push `dmft`.
+- The `~/forces_DMFT/DFTK.jl` worktree itself is still on `master`.
 - Standard Julia package conventions — tag releases via `TagBot`
 - `CompatHelper` automatically keeps `[compat]` bounds in `Project.toml` up to date
