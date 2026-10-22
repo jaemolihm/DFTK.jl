@@ -103,6 +103,8 @@ to supercell conventions. The parameters to adapt are the following:
 Other parameters stay untouched.
 """
 function cell_to_supercell(scfres::NamedTuple)
+    mpi_nprocs(scfres.basis.comm_kpts) > 1 &&
+        error("cell_to_supercell(scfres) is not supported with MPI k-point parallelization")
     # Transfer from cell to supercell need unfolded symmetries.
     scfres_unfold = unfold_bz(scfres)
     basis = scfres_unfold.basis

@@ -342,6 +342,8 @@ Shared file writing code for Wannier.jl and Wannier90.
     @assert length(projections) == n_wannier
 
     # TODO Use band_data_to_dict to get this easily MPI compatible.
+    mpi_nprocs(scfres.basis.comm_kpts) > 1 &&
+        error("Writing Wannier90 files is not supported with MPI k-point parallelization")
 
     # Undo symmetry operations to get full k-point list
     scfres_unfold = unfold_bz(scfres)
