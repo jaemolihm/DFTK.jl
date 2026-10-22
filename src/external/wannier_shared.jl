@@ -26,6 +26,12 @@ A hydrogenic initial guess.
 
 `α` is the diffusivity, ``\frac{Z}{a}`` where ``Z`` is the atomic number and
     ``a`` is the Bohr radius.
+
+`rotation` is an orthogonal matrix ``R`` (Cartesian) giving the local frame of the orbital:
+the angular factor is ``Y_{lm}(R \hat{q})`` instead of ``Y_{lm}(\hat{q})``, so that
+``g^R_{lm}(q) = \sum_{m'} D^l_{mm'}(R) g_{lm'}(q)`` with ``D^l`` from `wigner_d_matrix`.
+The wannier90 projection axes `x=`, `z=` correspond to ``R = [\hat{x}^T; \hat{y}^T; \hat{z}^T]``
+with ``\hat{y} = \hat{z} \times \hat{x}`` (as in `set_u_matrix` of pw2wannier90).
 """
 struct HydrogenicWannierProjection
     center::AbstractVector
@@ -33,6 +39,11 @@ struct HydrogenicWannierProjection
     l::Integer
     m::Integer
     α::Real
+    rotation::Mat3{Float64}
+    function HydrogenicWannierProjection(center, n, l, m, α; rotation=one(Mat3{Float64}))
+        @assert rotation' * rotation ≈ I "rotation must be orthogonal"
+        new(center, n, l, m, α, rotation)
+    end
 end
 
 function (proj::HydrogenicWannierProjection)(basis::PlaneWaveBasis, ps)
@@ -64,7 +75,8 @@ function (proj::HydrogenicWannierProjection)(basis::PlaneWaveBasis, ps)
         # both p and proj.center in reduced coordinates
         center_offset = exp(-im*2π*dot(p, proj.center))
         # without the 4π normalization because the matrix will be orthonormalized anyway
-        angular_part = ylm_real(proj.l, proj.m, p_cart) * (-im)^proj.l
+        q_local = Mat3{eltype(p_cart)}(proj.rotation) * p_cart
+        angular_part = ylm_real(proj.l, proj.m, q_local) * (-im)^proj.l
 
         center_offset * angular_part * radial_part
     end
