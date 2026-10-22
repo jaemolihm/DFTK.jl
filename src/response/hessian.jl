@@ -239,6 +239,19 @@ function (cb::OmegaPlusKDefaultCallback)(info)
     info
 end
 
+# GMRES in solve_ΩplusK_split needs (δρ, δτ) as one flat array, so they are stacked along
+# the spin axis here instead of using the NamedTuple of pack_gdensity (hubbard_n is not
+# differentiated in DFPT).
+_pack_δρδτ(δρ, δτ::Nothing) = δρ
+_pack_δρδτ(δρ, δτ) = cat(δρ, δτ; dims=Val(4))
+function _split_δρδτ(basis::PlaneWaveBasis, x::AbstractArray)
+    x = reshape(x, basis.fft_size..., :)
+    n_spin = basis.model.n_spin_components
+    @assert size(x, 4) == n_spin || size(x, 4) == 2n_spin
+    size(x, 4) == n_spin && return (x, nothing)
+    (@view(x[:, :, :, 1:n_spin]), @view(x[:, :, :, n_spin+1:end]))
+end
+
 """
 Solve the problem `(Ω+K) δψ = -δHextψ` (density-functional perturbation theory)
 using a split algorithm, where
@@ -326,14 +339,15 @@ Input parameters:
     ε_adj = DielectricAdjoint(ham, ρ, τ, ψ, occupation, εF, eigenvalues, occupation_threshold,
                               bandtolalg, maxiter_sternheimer, q)
     precon = FunctionPreconditioner() do Px, x
-        Px .= vec(mix_gdensity(mixing, basis, reshape(x, basis.fft_size..., :);
-                               ham, basis, ρin=ρ, εF, eigenvalues, ψ))
+        Pinv_D = mix_gdensity(mixing, basis, pack_gdensity(basis, _split_δρδτ(basis, x)...);
+                              ham, basis, ρin=ρ, εF, eigenvalues, ψ)
+        Px .= vec(_pack_δρδτ(Pinv_D.ρ, Pinv_D.τ))
     end
     callback_inner(info) = callback(merge(info, (; runtime_ns=time_ns() - start_ns, basis=basis)))
-    info_gmres = inexact_gmres(ε_adj, vec(pack_gdensity(basis, δρ0, δτ0));
+    info_gmres = inexact_gmres(ε_adj, vec(_pack_δρδτ(δρ0, δτ0));
                                tol, precon, krylovdim, maxiter, s,
                                callback=callback_inner, kwargs...)
-    δρ, δτ = split_gdensity(basis, reshape(info_gmres.x, basis.fft_size..., :))
+    δρ, δτ = _split_δρδτ(basis, info_gmres.x)
     if !info_gmres.converged
         @warn "Solve_ΩplusK_split solver not converged"
     end
@@ -423,7 +437,7 @@ function DielectricAdjoint(scfres; bandtolalg=BandtolBalanced(scfres), q=zero(Ve
 end
 @views @timing "DielectricAdjoint" function mul_approximate(ε_adj::DielectricAdjoint, x; rtol=0.0, kwargs...)
     basis = ε_adj.ham.basis
-    δρ, δτ = split_gdensity(basis, reshape(x, basis.fft_size..., :))
+    δρ, δτ = _split_δρδτ(basis, x)
     δV = apply_kernel(basis, δρ; ε_adj.ρ, ε_adj.q, ε_adj.τ, δτ)
     χ0δV = apply_χ0(ε_adj.ham, ε_adj.ψ, ε_adj.occupation, ε_adj.εF, ε_adj.eigenvalues, δV.δVρ;
                     δVτ=δV.δVτ,
@@ -434,7 +448,7 @@ end
     # (1 - χ0 K) δρ
     ε_δρ = δρ - χ0δV.δρ
     ε_δτ = isnothing(δτ) ? nothing : δτ - χ0δV.δτ
-    Ax = vec(pack_gdensity(basis, ε_δρ, ε_δτ))
+    Ax = vec(_pack_δρδτ(ε_δρ, ε_δτ))
     (; Ax, info=(; rtol, χ0δV...))
 end
 function Base.size(ε_adj::DielectricAdjoint, i::Integer)
