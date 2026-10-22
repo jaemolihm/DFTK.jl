@@ -20,10 +20,17 @@ function my_fp_solver(f, x0, info0; maxiter, damping)
         if info.converged || info.timedout
             break
         end
-        x = x + damping * (fx - x)
+        ## Damp each component of the generalised density which is present
+        x = map(x, fx) do xᵢ, fxᵢ
+            isnothing(xᵢ) ? nothing : xᵢ + damping * (fxᵢ - xᵢ)
+        end
     end
     (; fixpoint=x, info)
 end;
+# The SCF iterate `x` is the generalised density, a `NamedTuple` `(; ρ, τ, hubbard_n)`
+# holding the density `ρ`, the kinetic energy density `τ` (meta-GGA only) and the
+# Hubbard occupation matrix `hubbard_n` (DFT+U only); absent components are `nothing`.
+#
 # Note that the fixpoint map `f` operates on an auxiliary variable `info` for
 # state bookkeeping. Early termination criteria are flagged from inside
 # the function `f` using boolean flags `info.converged` and `info.timedout`.

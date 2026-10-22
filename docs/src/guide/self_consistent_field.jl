@@ -119,30 +119,33 @@
 # DFTK automatically provides a reasonable
 # guess density as well as function to evaluate $F(ρ)$,
 # such that we only need to take care of the iterations themselves.
+# The iterate DFTK passes to the solver is the generalised density, a `NamedTuple`
+# `(; ρ, τ, hubbard_n)`, whose field `ρ` is the density $\rho$ (the other fields are
+# `nothing` for the LDA and GGA models considered here).
 # In the language of DFTK this algorithm is written as:
 
 using DFTK
 using LinearAlgebra
 
-function fixed_point_iteration(F, ρ0, info0; maxiter, damping, tol=1e-10)
+function fixed_point_iteration(F, x0, info0; maxiter, damping, tol=1e-10)
     ## F:        The SCF step function
-    ## ρ0:       The initial guess density
+    ## x0:       The initial guess (generalised) density
     ## info0:    The initial metadata
     ## maxiter:  The maximal number of iterations to be performed
 
-    ρ = ρ0
+    x = x0
     info = info0
     for n = 1:maxiter
-        Fρ, info = F(ρ, info)
-        ## If the change is less than the tolerance, break iteration.
-        if norm(Fρ - ρ) < tol
+        Fx, info = F(x, info)
+        ## If the change in density is less than the tolerance, break iteration.
+        if norm(Fx.ρ - x.ρ) < tol
             break
         end
-        ρ = Fρ
+        x = Fx
     end
 
     ## Return some stuff DFTK needs ...
-    (; fixpoint=ρ, info)
+    (; fixpoint=x, info)
 end;
 
 # !!! note "Convergence checks in DFTK"
@@ -225,22 +228,23 @@ self_consistent_field(aluminium_setup(1); solver=fixed_point_iteration, damping=
 # ```
 # In terms of an algorithm Anderson iteration is
 
-function anderson_iteration(F, ρ0, info0; maxiter, damping)
+function anderson_iteration(F, x0, info0; maxiter, damping)
     ## F:        The SCF step function
-    ## ρ0:       The initial guess density
+    ## x0:       The initial guess (generalised) density
     ## info0:    The initial metadata
     ## maxiter:  The maximal number of iterations to be performed
 
     info = info0
-    ρ  = ρ0
+    x  = x0
     ρs = []
     Rs = []
     for n = 1:maxiter
-        Fρ, info = F(ρ, info)
+        Fx, info = F(x, info)
         if info.converged
             break
         end
-        Rρ = damping * (Fρ - ρ)
+        ρ  = x.ρ
+        Rρ = damping * (Fx.ρ - ρ)
 
         ρnext = vec(ρ) .+ vec(Rρ)
         if !isempty(Rs)
@@ -254,11 +258,11 @@ function anderson_iteration(F, ρ0, info0; maxiter, damping)
 
         push!(ρs, vec(ρ))
         push!(Rs, vec(Rρ))
-        ρ = reshape(ρnext, size(ρ0)...)
+        x = (; Fx..., ρ=reshape(ρnext, size(ρ)...))
     end
 
     ## Return some stuff DFTK needs ...
-    (; fixpoint=ρ, info)
+    (; fixpoint=x, info)
 end;
 
 # To work with this algorithm we will use DFTK's intrinsic mechanism to choose a damping. The syntax for this is
