@@ -455,33 +455,48 @@ function unfold_bz(basis::PlaneWaveBasis)
     end
 end
 
-# Normalized k-point coordinate rounded to SYMMETRY_TOLERANCE, used as a key to identify
-# k-points. If x and y are both close to a round value, round(x)===round(y), except at zero
-# where 0.0 and -0.0 are considered different. Add 0.0 to make both -0.0 and 0.0 equal to 0.0
-function rounded_kcoord(k)
+# Normalized k-point coordinate rounded to the precision of SYMMETRY_TOLERANCE, which
+# identifies a k-point as a hashable key. If x and y are both close to a round value,
+# round(x)===round(y), except at zero where 0.0 and -0.0 are considered different. Add 0.0
+# to make both -0.0 and 0.0 equal to 0.0
+function round_kpoint_coordinate(k)
     digits = ceil(Int, -log10(SYMMETRY_TOLERANCE))
     normalize_kpoint_coordinate(round.(k; digits) .+ 0.0)
 end
 
 """
-For every k-point of `basis_target.kcoords_global` the pair `(ik_irred, isym)`, such that
+For every k-point coordinate in `kcoords` the pair `(ik_irred, isym)`, such that
 `basis_irred.symmetries[isym]` maps the irreducible k-point `basis_irred.kcoords_global[ik_irred]`
 (`ik_irred ≤ basis_irred.n_irreducible_kpoints`) to it, modulo a reciprocal lattice vector.
 The first match in the order of irreducible k-points, then symmetries, is taken. The result
 does not depend on the k-point distribution over MPI ranks.
 """
-function unfold_map(basis_irred::PlaneWaveBasis, basis_target::PlaneWaveBasis)
+function unfold_mapping(basis_irred::PlaneWaveBasis, kcoords::AbstractVector{<:AbstractVector})
     source = Dict{Vec3{Float64}, Tuple{Int, Int}}()
     for ik_irred = 1:basis_irred.n_irreducible_kpoints,
             (isym, symop) in enumerate(basis_irred.symmetries)
         Sk = symop.S * basis_irred.kcoords_global[ik_irred]
-        get!(source, rounded_kcoord(Sk), (ik_irred, isym))
+        get!(source, round_kpoint_coordinate(Sk), (ik_irred, isym))
     end
-    map(basis_target.kcoords_global) do k
-        get(source, rounded_kcoord(k)) do
+    map(kcoords) do k
+        get(source, round_kpoint_coordinate(k)) do
             error("k-point $k is not in the star of an irreducible k-point")
         end
     end
+end
+function unfold_mapping(basis_irred::PlaneWaveBasis, basis_target::PlaneWaveBasis)
+    unfold_mapping(basis_irred, basis_target.kcoords_global)
+end
+
+# Find where in the irreducible basis `basis_irred` the k-point `kpt_unfolded` is handled:
+# the index in `basis_irred.kpoints` (this MPI rank only) and the symmetry operation
+function unfold_mapping(basis_irred::PlaneWaveBasis, kpt_unfolded::Kpoint)
+    ik_global, isym = only(unfold_mapping(basis_irred, [kpt_unfolded.coordinate]))
+    ik_irred = findfirst(basis_irred.kpoints) do kpt
+        kpt.spin == kpt_unfolded.spin && kpt.coordinate == basis_irred.kcoords_global[ik_global]
+    end
+    isnothing(ik_irred) && error("The irreducible k-point is not on this MPI rank")
+    ik_irred, basis_irred.symmetries[isym]
 end
 
 """
@@ -489,7 +504,7 @@ Unfold k-point data from `basis_irred` to the k-points of `basis_target`, which 
 the stars of the irreducible k-points. `data` holds ψ (`is_ψ = true`, possibly a subset of
 the bands) or a per-band quantity (eigenvalues, occupations), with the same number of bands
 at all k-points. Each target k-point receives the data of the source given by
-[`unfold_map`](@ref), transformed by the symmetry operation in the case of ψ. Unless the
+[`unfold_mapping`](@ref), transformed by the symmetry operation in the case of ψ. Unless the
 two bases are the same, the output arrays do not alias `data` or each other.
 """
 function unfold_array(basis_irred, basis_target, data, is_ψ)
@@ -504,87 +519,80 @@ function unfold_array(basis_irred, basis_target, data, is_ψ)
     n_spin = basis_irred.model.n_spin_components
     n_spin == basis_target.model.n_spin_components ||
         error("unfold_array needs bases with the same number of spin components")
-    all(k -> all(-0.5 .≤ k .< 0.5), basis_target.kcoords_global) ||
-        error("unfold_array needs target k-points normalized to [-0.5, 0.5)")
-    all(k -> all(-0.5 .≤ k .< 0.5),
-        basis_irred.kcoords_global[1:basis_irred.n_irreducible_kpoints]) ||
-        error("unfold_array needs irreducible k-points normalized to [-0.5, 0.5)")
     basis_irred.architecture isa CPU || error("unfold_array is implemented for the CPU only")
 
-    comm = basis_irred.comm_kpts
-    rank = MPI.Comm_rank(comm)
-    n_bands = is_ψ ? size.(data, 2) : length.(data)
-    mpi_min(minimum(n_bands), comm) == mpi_max(maximum(n_bands), comm) ||
+    # Bands are the last axis of ψk and of εk. Received data is allocated with n_bands.
+    n_bands_k = [size(d, ndims(d)) for d in data]
+    n_bands = mpi_max(maximum(n_bands_k), basis_irred.comm_kpts)
+    mpi_min(minimum(n_bands_k), basis_irred.comm_kpts) == n_bands ||
         error("unfold_array needs the same number of bands at all k-points")
-    n_bands = first(n_bands)
 
-    # Global spin-doubled k-point index (σ - 1) n_kpt + ik, as in `krange_allprocs`.
-    function owner_ranks(basis)
-        owner = zeros(Int, n_spin * length(basis.kcoords_global))
-        for (r, kranges) in enumerate(basis.krange_allprocs), krange in kranges
-            owner[krange] .= r - 1
-        end
-        owner
-    end
-    owner_irred  = owner_ranks(basis_irred)
-    owner_target = owner_ranks(basis_target)
-    n_kpt_irred  = length(basis_irred.kcoords_global)
-    n_kpt_target = length(basis_target.kcoords_global)
-    kmap = unfold_map(basis_irred, basis_target)
-    # Global index of the source of the target `it`, and the index of the symmetry operation
-    function source(it)
-        σ = (it - 1) ÷ n_kpt_target + 1
-        ik_irred, isym = kmap[it - (σ - 1) * n_kpt_target]
-        (σ - 1) * n_kpt_irred + ik_irred, isym
-    end
-    local_irred(is) = findfirst(==(is), basis_irred.krange_thisproc_allspin)
-
-    # The exchange plan is derived on every rank from the replicated map. Sends and receives
-    # are posted in the order of the source index on both sides, so the messages of one
-    # (sender, receiver) pair match in order with a single tag.
-    sends = sort!(unique!([(first(source(it)), owner_target[it])
-                           for it in eachindex(owner_target)
-                           if owner_irred[first(source(it))] == rank && owner_target[it] != rank]))
-    recvs = sort!(unique!([(first(source(it)), owner_irred[first(source(it))])
-                           for it in basis_target.krange_thisproc_allspin
-                           if owner_irred[first(source(it))] != rank]))
+    # Source and symmetry operation of every target k-point. K-points are indexed globally,
+    # with the spin-doubled index (σ - 1) n_kpt + ik of `krange_allprocs`.
+    kmap = unfold_mapping(basis_irred, basis_target)
+    n_kpt_irred = length(basis_irred.kcoords_global)
+    isource = vec([(σ - 1) * n_kpt_irred + ik_irred for (ik_irred, _) in kmap, σ = 1:n_spin])
+    isymop  = vec([isym for (_, isym) in kmap, σ = 1:n_spin])
 
     # Source k-points rebuilt on basis_target: they set the G ordering of ψ for apply_symop
-    function source_kpoint(is)
-        σ = (is - 1) ÷ n_kpt_irred + 1
-        Kpoint(basis_target, basis_irred.kcoords_global[is - (σ - 1) * n_kpt_irred], σ)
-    end
-    kpoints_source = if is_ψ
-        sources_local = unique(first.(source.(basis_target.krange_thisproc_allspin)))
-        Dict(is => source_kpoint(is) for is in sources_local)
-    end
-
-    # `data` may hold views, for which `similar` returns an Array
-    received = Dict{Int, Array{eltype(first(data))}}()
-    requests = MPI.Request[]
-    for (is, dest) in sends
-        push!(requests, MPI.Isend(data[local_irred(is)], comm; dest, tag=0))
-    end
-    for (is, src) in recvs
-        size_source = is_ψ ? (length(G_vectors(basis_target, kpoints_source[is])), n_bands) :
+    kpoints_source = Dict(map(unique(isource[basis_target.krange_thisproc_allspin])) do is
+        σ, ik_irred = divrem(is - 1, n_kpt_irred) .+ 1
+        is => Kpoint(basis_target, basis_irred.kcoords_global[ik_irred], σ)
+    end)
+    size_source(is) = is_ψ ? (length(G_vectors(basis_target, kpoints_source[is])), n_bands) :
                              (n_bands, )
-        received[is] = similar(first(data), size_source)
-        push!(requests, MPI.Irecv!(received[is], comm; source=src, tag=0))
-    end
-    MPI.Waitall(requests)
+    data_source = _gather_unfold_sources(basis_irred, basis_target, data, isource, size_source)
 
     map(basis_target.krange_thisproc_allspin, basis_target.kpoints) do it, kpt
-        is, isym = source(it)
-        is_local = owner_irred[is] == rank
-        data_source = is_local ? data[local_irred(is)] : received[is]
-        is_ψ || return copy(data_source)
-        Skpoint, ψSk = apply_symop(basis_irred.symmetries[isym], basis_target,
-                                   kpoints_source[is], data_source)
-        # For the identity, apply_symop returns ψ on the G ordering of the source k-point
+        is = isource[it]
+        is_ψ || return copy(data_source[is])
+        Skpoint, ψSk = apply_symop(basis_irred.symmetries[isymop[it]], basis_target,
+                                   kpoints_source[is], data_source[is])
         @assert Skpoint.coordinate ≈ kpt.coordinate
-        @assert size(ψSk, 1) == length(G_vectors(basis_target, kpt))
-        is_local && ψSk === data_source ? copy(ψSk) : ψSk
+        # apply_symop returns its input for the identity
+        ψSk === data_source[is] ? copy(ψSk) : ψSk
     end
+end
+
+# MPI rank holding each k-point, by the spin-doubled global index of `krange_allprocs`
+function _rank_of_kpoints(basis)
+    rank_of_kpoints = zeros(Int, basis.model.n_spin_components * length(basis.kcoords_global))
+    for (r, kranges) in enumerate(basis.krange_allprocs), krange in kranges
+        rank_of_kpoints[krange] .= r - 1
+    end
+    rank_of_kpoints
+end
+
+# The data of the sources `isource[it]` of the target k-points `it` on this rank, keyed by
+# the source index. Data of other ranks is received into arrays of size `size_source(is)`.
+function _gather_unfold_sources(basis_irred, basis_target, data, isource, size_source)
+    comm = basis_irred.comm_kpts
+    rank = MPI.Comm_rank(comm)
+    rank_irred  = _rank_of_kpoints(basis_irred)
+    rank_target = _rank_of_kpoints(basis_target)
+
+    # Every rank derives the full plan from the replicated `isource`. Sends and receives are
+    # posted in the order of the source index on both sides, so the messages between two
+    # ranks match in order with a single tag.
+    sends = sort!(unique!([(is, rank_target[it]) for (it, is) in enumerate(isource)
+                           if rank_irred[is] == rank && rank_target[it] != rank]))
+    recvs = sort!(unique!([(isource[it], rank_irred[isource[it]])
+                           for it in basis_target.krange_thisproc_allspin
+                           if rank_irred[isource[it]] != rank]))
+
+    data_source = Dict{Int, AbstractArray{eltype(first(data))}}(
+        zip(basis_irred.krange_thisproc_allspin, data))
+    requests = MPI.Request[]
+    for (is, dest) in sends
+        push!(requests, MPI.Isend(data_source[is], comm; dest, tag=0))
+    end
+    for (is, source) in recvs
+        # `data` may hold views, for which `similar` returns an Array
+        data_source[is] = similar(first(data), size_source(is))
+        push!(requests, MPI.Irecv!(data_source[is], comm; source, tag=0))
+    end
+    MPI.Waitall(requests)
+    data_source
 end
 
 function unfold_bz(scfres)
@@ -604,5 +612,5 @@ function unfold_kcoords(kcoords, symmetries)
     all_kcoords = [normalize_kpoint_coordinate(symop.S * kcoord)
                    for kcoord in kcoords, symop in symmetries]
     # uniquify
-    unique(rounded_kcoord, all_kcoords)
+    unique(round_kpoint_coordinate, all_kcoords)
 end

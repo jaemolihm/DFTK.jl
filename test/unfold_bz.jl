@@ -125,7 +125,7 @@ end
                 # ε and f are copied from the source; on COMM_SELF local and global indices
                 # agree
                 if !is_ψ
-                    kmap = DFTK.unfold_map(basis_ref, target_ref)
+                    kmap = DFTK.unfold_mapping(basis_ref, target_ref)
                     n_kpt_ref = length(target_ref.kcoords_global)
                     @test all(1:length(target_ref.kpoints)) do it
                         σ = target_ref.kpoints[it].spin
@@ -139,7 +139,7 @@ end
     end
 end
 
-@testitem "unfold_map" setup=[TestCases, UnfoldBZ] begin
+@testitem "unfold_mapping" setup=[TestCases, UnfoldBZ] begin
     using DFTK
     using MPI
     using .UnfoldBZ: silicon_model, explicit_full_basis
@@ -151,7 +151,7 @@ end
         basis_mpi  = PlaneWaveBasis(model; Ecut, kgrid)
         target_mpi = explicit_full_basis(basis_mpi, kgrid; comm_kpts=MPI.COMM_WORLD)
 
-        kmap = DFTK.unfold_map(basis_mpi, target_mpi)
+        kmap = DFTK.unfold_mapping(basis_mpi, target_mpi)
         @test length(kmap) == length(target_mpi.kcoords_global)
         @test all(zip(kmap, target_mpi.kcoords_global)) do ((ik_irred, isym), k)
             ik_irred ≤ basis_mpi.n_irreducible_kpoints || return false
@@ -163,14 +163,23 @@ end
     # Duplicated target k-points (on more than 2 ranks) map like their original
     basis = PlaneWaveBasis(model; Ecut, kgrid=[2, 2, 2])
     target = explicit_full_basis(basis, [2, 2, 2]; comm_kpts=MPI.COMM_WORLD, n_kpt=2)
-    kmap = DFTK.unfold_map(basis, target)
+    kmap = DFTK.unfold_mapping(basis, target)
     @test all(enumerate(target.kcoords_global)) do (it, k)
         kmap[it] == kmap[findfirst(==(k), target.kcoords_global)]
+    end
+
+    # The method on a single Kpoint returns the local index and the symmetry operation
+    basis_ref  = PlaneWaveBasis(model; Ecut, kgrid=[3, 3, 3], comm_kpts=MPI.COMM_SELF)
+    target_ref = explicit_full_basis(basis_ref, [3, 3, 3]; comm_kpts=MPI.COMM_SELF)
+    @test all(target_ref.kpoints) do kpt
+        ik_irred, symop = DFTK.unfold_mapping(basis_ref, kpt)
+        Sk = symop.S * basis_ref.kpoints[ik_irred].coordinate
+        all(Δ -> abs(Δ - round(Δ)) < 1e-10, Sk - kpt.coordinate)
     end
 
     basis = PlaneWaveBasis(model; Ecut, kgrid=[3, 3, 3])
     model_nosym = silicon_model(silicon, :none; symmetries=false)
     basis_outside = PlaneWaveBasis(model_nosym; Ecut, basis.fft_size,
                                    kgrid=ExplicitKpoints([[0.1, 0.2, 0.3]]))
-    @test_throws ErrorException DFTK.unfold_map(basis, basis_outside)
+    @test_throws ErrorException DFTK.unfold_mapping(basis, basis_outside)
 end
