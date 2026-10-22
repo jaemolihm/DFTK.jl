@@ -20,8 +20,17 @@ end
     g(l, m; kwargs...) = DFTK.HydrogenicWannierProjection(center, 3, l, m, 1.0; kwargs...)(basis, ps)
 
     @testset "Identity rotation" begin
-        for l = 0:3, m = -l:l
-            @test g(l, m) == g(l, m; rotation=Mat3([1.0 0 0; 0 1 0; 0 0 1]))
+        # g_lm(q) = f_l(q) Y_lm(q̂) with ylm_real on the unrotated q: the m-independent factor
+        # f_l = Σ_m g_lm Y_lm / Σ_m Y_lm² (Σ_m Y_lm² = (2l+1)/4π) reproduces every g_lm
+        q_cart = [DFTK.recip_vector_red_to_cart(model, p) for p in ps]
+        for l = 0:3
+            Y  = reduce(hcat, [DFTK.ylm_real.(l, m, q_cart) for m = -l:l])
+            gs = reduce(hcat, [g(l, m) for m = -l:l])
+            f_l = sum(gs .* Y; dims=2) ./ sum(abs2, Y; dims=2)
+            @test gs ≈ f_l .* Y rtol=1e-12
+            for m = -l:l
+                @test g(l, m) == g(l, m; rotation=Mat3([1.0 0 0; 0 1 0; 0 0 1]))
+            end
         end
     end
 
@@ -51,6 +60,7 @@ end
         end
     end
 
+    @test isconcretetype(fieldtype(DFTK.HydrogenicWannierProjection, :rotation))
     @test_throws AssertionError DFTK.HydrogenicWannierProjection(center, 3, 2, 0, 1.0;
                                                                  rotation=2*one(Mat3{Float64}))
 end
