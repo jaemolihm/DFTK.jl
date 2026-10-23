@@ -343,13 +343,13 @@ function mix_dielectric_model(mixing::χ0Mixing, basis::PlaneWaveBasis, Δx::Abs
         ishermitian=false,
         isposdef=false,
     )
-    if mpi_master(MPI.COMM_WORLD)
+    if mpi_master(basis.comm_kpts)
         cond_not = info.converged == 0 ? "NOT " : ""
         cond_eps = act_on_density ? "ε_adj" : "ε"
         @debug "χ0Mixing GMRES$(cond_not) on $(cond_eps) converged in $(info.numops) ε-vec-products."
         info.converged == 0 && @warn "χ0-mixing GMRES not converged."
     end
-    MPI.Bcast!(mixed_Δx, 0, MPI.COMM_WORLD)
+    mpi_bcast!(mixed_Δx, basis.comm_kpts)  # Enforce numerically identical result across ranks
 
     if act_on_density
         # Ensure that the mean value of Δρ is unchanged (conservation of electron count)
