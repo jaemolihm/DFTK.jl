@@ -121,6 +121,28 @@ end
     end
 end
 
+@testitem "Diagonalization with an oversized guess" setup=[TestCases] begin
+    using DFTK
+    using PseudoPotentialData
+    silicon = TestCases.silicon
+
+    Si = ElementPsp(silicon.atnum, PseudoFamily("cp2k.nc.sr.lda.v0_1.semicore.gth"))
+    model = model_DFT(silicon.lattice, [Si, Si], silicon.positions;
+                      functionals=[:lda_xc_teter93])
+    basis = PlaneWaveBasis(model; Ecut=5, silicon.kgrid)
+    ham = Hamiltonian(basis; ρ=guess_density(basis))
+
+    nev = 6
+    ψguess = DFTK.random_orbitals(basis, 2nev)
+    res_random = diagonalize_all_kblocks(lobpcg_hyper, ham, nev; tol=1e-8)
+    res_large  = diagonalize_all_kblocks(lobpcg_hyper, ham, nev; tol=1e-8, ψguess)
+    @test res_large.converged
+    for ik = 1:length(basis.kpoints)
+        @test size(res_large.X[ik], 2) == nev
+        @test res_large.λ[ik] ≈ res_random.λ[ik] atol=1e-7
+    end
+end
+
 # The LOBPCG-internal unit tests (LazyHcat data structures, print callback, and standalone
 # diagonalization of dense matrices) now live in the LOBPCGEigensolver.jl package.
 # The tests kept here exercise DFTK's k-block diagonalization machinery on actual

@@ -90,3 +90,34 @@ function random_orbitals(basis::AbstractBasis, howmany::Integer)
         random_orbitals(basis, kpt, howmany)
     end
 end
+
+@doc raw"""
+    atomic_random_initial_guess(basis; amplitude=0.05)
+
+Initial guess for the orbitals from all pseudo-atomic orbitals of the pseudopotentials
+(the non-orthogonalized orbitals behind `atomic_orbital_projectors`), with each
+plane-wave coefficient multiplied by ``1 + a r e^{2πiθ}`` with ``a`` = `amplitude` and
+``r, θ`` uniform in ``[0, 1)``. This is the `startingwfc = 'atomic+random'` guess of
+Quantum ESPRESSO (`init_wfc` in `PW/src/wfcinit.f90`).
+
+Returns for each k-point all orbitals (`n_G × n_orbitals`), neither orthogonalized nor
+truncated. `diagonalize_all_kblocks` reduces a guess with more columns than the
+requested number of bands by Rayleigh–Ritz in its span, and pads one with fewer columns
+with random vectors. Errors if a pseudopotential has no pseudo-atomic wavefunctions.
+"""
+function atomic_random_initial_guess(basis::PlaneWaveBasis{T}; amplitude=0.05) where {T}
+    for atom in basis.model.atoms
+        if !(atom isa ElementPsp && atom.psp isa PspUpf && count_n_pswfc(atom.psp) > 0)
+            error("atomic_random_initial_guess needs pseudo-atomic wavefunctions, but the " *
+                  "pseudopotential of $atom has none. Use a UPF pseudopotential with " *
+                  "PP_PSWFC or a random guess (ψ=nothing).")
+        end
+    end
+    (; orbitals) = _atomic_orbitals_nonorthogonal(basis)
+    map(orbitals) do Φk_cpu
+        Φk = to_device(basis.architecture, Φk_cpu)
+        r = rand!(TaskLocalRNG(), similar(Φk, T))
+        θ = rand!(TaskLocalRNG(), similar(Φk, T))
+        Φk .* (1 .+ T(amplitude) .* r .* cis2pi.(θ))
+    end
+end
