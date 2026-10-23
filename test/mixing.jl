@@ -83,22 +83,22 @@
     end
 end
 
-@testitem "χ0Mixing on a basis that does not span MPI.COMM_WORLD" setup=[TestCases] begin
+@testitem "χ0Mixing on a basis-specific communicator" setup=[TestCases] begin
     # Every rank holds its own basis (comm_kpts = COMM_SELF) and a different Δρ, as when DFTK
     # runs on a subset of the processes of an MPI job: P Δρ must be each rank's own solution
     # of ε† P Δρ = Δρ (up to the constant fixed by electron-count conservation).
+    # Δρ differs between ranks because each process seeds its RNG independently.
     using DFTK
     using MPI
     using LinearAlgebra
     using Statistics
-    using Random
     silicon = TestCases.silicon
     model = model_DFT(silicon.lattice, silicon.atoms, silicon.positions;
                       functionals=PBE(), temperature=0.01)
     basis = PlaneWaveBasis(model; Ecut=6, kgrid=[2, 2, 2], comm_kpts=MPI.COMM_SELF)
     scfres = self_consistent_field(basis; tol=1e-4, callback=identity)
 
-    Δρ = randn(Xoshiro(1 + MPI.Comm_rank(MPI.COMM_WORLD)), size(scfres.ρ))
+    Δρ = randn(size(scfres.ρ))
     mixing = LdosMixing()
     PΔρ = DFTK.mix_density(mixing, basis, Δρ; ρin=scfres.ρ, scfres.ψ, scfres.occupation,
                            scfres.eigenvalues, scfres.εF)
