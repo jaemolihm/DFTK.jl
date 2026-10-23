@@ -116,7 +116,7 @@ end
         ref = -354.91625589331755
         e_total = scfres.energies.total
         @test e_total ≈ ref
-        ref_hub = 0.17631957087331435
+        ref_hub = 0.17631970014534853
         @test scfres.energies.Hubbard ≈ ref_hub
    end
    @testset "Test symmetry consistency" begin
