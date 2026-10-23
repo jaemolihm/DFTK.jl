@@ -5,6 +5,10 @@ is true and if no guesses are given. `eigensolver` is the iterative eigensolver
 that really does the work, operating on a single ``k``-Block.
 `eigensolver` should support the API `eigensolver(A, X0; prec, tol, maxiter)`
 `prec_type` should be a function that returns a preconditioner when called as `prec(ham, kpt)`
+
+A guess `ψguess[ik]` with more than `nev_per_kpoint` columns is passed to `eigensolver`
+as a whole and only the lowest `nev_per_kpoint` eigenpairs are returned; one with fewer
+columns is padded with random vectors.
 """
 function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::Int;
                                  ψguess=nothing,
@@ -26,9 +30,7 @@ function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::
                       "Hamiltonian ($n_Gk)")
             end
             nev_guess = size(ψguess[ik], 2)
-            if nev_guess > nev_per_kpoint
-                ψguessk = ψguess[ik][:, 1:nev_per_kpoint]
-            elseif nev_guess == nev_per_kpoint
+            if nev_guess >= nev_per_kpoint
                 ψguessk = ψguess[ik]
             else
                 X0 = similar(ψguess[ik], n_Gk, nev_per_kpoint)
@@ -43,12 +45,16 @@ function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::
         else
             ψguessk = random_orbitals(ham.basis, kpt, nev_per_kpoint)
         end
-        @assert size(ψguessk) == (n_Gk, nev_per_kpoint)
+        @assert size(ψguessk, 1) == n_Gk && size(ψguessk, 2) ≥ nev_per_kpoint
 
         prec = nothing
         !isnothing(prec_type) && (prec = prec_type(ham[ik]))
-        results[ik] = eigensolver(ham[ik], ψguessk;
-                                  prec, tol, miniter, maxiter, n_conv_check)
+        res = eigensolver(ham[ik], ψguessk; prec, tol, miniter, maxiter,
+                          n_conv_check=something(n_conv_check, nev_per_kpoint))
+        # The eigensolver iterates all columns of a wider guess: keep the lowest ones
+        results[ik] = merge(res, (; λ=res.λ[1:nev_per_kpoint],
+                                    X=res.X[:, 1:nev_per_kpoint],
+                                    residual_norms=res.residual_norms[1:nev_per_kpoint]))
     end
 
     # Transform results into a nicer datastructure
