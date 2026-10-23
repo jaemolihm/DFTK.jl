@@ -51,10 +51,12 @@ function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::
         !isnothing(prec_type) && (prec = prec_type(ham[ik]))
         res = eigensolver(ham[ik], ψguessk; prec, tol, miniter, maxiter,
                           n_conv_check=something(n_conv_check, nev_per_kpoint))
-        # The eigensolver iterates all columns of a wider guess: keep the lowest ones
-        results[ik] = merge(res, (; λ=res.λ[1:nev_per_kpoint],
-                                    X=res.X[:, 1:nev_per_kpoint],
-                                    residual_norms=res.residual_norms[1:nev_per_kpoint]))
+        if size(res.X, 2) > nev_per_kpoint
+            # The eigensolver iterated all columns of a wider guess: keep the lowest ones
+            res = merge(res, (; λ=res.λ[1:nev_per_kpoint], X=res.X[:, 1:nev_per_kpoint],
+                                residual_norms=res.residual_norms[1:nev_per_kpoint]))
+        end
+        results[ik] = res
     end
 
     # Transform results into a nicer datastructure
