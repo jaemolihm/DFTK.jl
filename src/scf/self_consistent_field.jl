@@ -83,8 +83,7 @@ function next_density(ham::Hamiltonian,
                       fermialg::AbstractFermiAlgorithm=default_fermialg(ham.basis.model);
                       eigensolver=lobpcg_hyper, ψ=nothing, eigenvalues=nothing,
                       occupation=nothing, kwargs...)
-    n_bands_converge, n_bands_compute = determine_n_bands(nbandsalg, occupation,
-                                                          eigenvalues)
+    n_bands_converge, n_bands_compute = determine_n_bands(nbandsalg, occupation, eigenvalues)
 
     if isnothing(ψ)
         increased_n_bands = true
