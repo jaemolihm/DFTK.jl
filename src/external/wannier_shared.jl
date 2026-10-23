@@ -75,8 +75,8 @@ function (proj::HydrogenicWannierProjection)(basis::PlaneWaveBasis, ps)
         # both p and proj.center in reduced coordinates
         center_offset = exp(-im*2π*dot(p, proj.center))
         # without the 4π normalization because the matrix will be orthonormalized anyway
-        q_local = Mat3{eltype(p_cart)}(proj.rotation) * p_cart
-        angular_part = ylm_real(proj.l, proj.m, q_local) * (-im)^proj.l
+        Rp_cart = Mat3{eltype(p_cart)}(proj.rotation) * p_cart
+        angular_part = ylm_real(proj.l, proj.m, Rp_cart) * (-im)^proj.l
 
         center_offset * angular_part * radial_part
     end
