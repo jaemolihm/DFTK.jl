@@ -161,3 +161,33 @@ end
                                                 damping=DFTK.AdaptiveDamping(1.5))
     @test maximum(abs, scfres.ρ - ρ_ref) < 10tol
 end
+
+@testitem "SCF from a wide atomic guess" setup=[TestCases] begin
+    using DFTK
+    using PseudoPotentialData
+    silicon = TestCases.silicon
+
+    Si = ElementPsp(silicon.atnum, PseudoFamily("dojo.nc.sr.lda.v0_4_1.standard.upf"))
+    model = model_DFT(silicon.lattice, [Si, Si], silicon.positions;
+                      functionals=LDA(), temperature=1e-3)
+    basis = PlaneWaveBasis(model; Ecut=10, silicon.kgrid)
+    tol = 1e-8
+    # s and p orbitals on each atom: more columns than the bands computed below
+    ψ = DFTK.atomic_orbitals_with_random_noise(basis)
+    n_bands_guess = size(ψ[1], 2)
+
+    # The band count comes from nbandsalg, not from the column count of ψ
+    nbandsalg = FixedBands(; n_bands_converge=5, n_bands_compute=6)
+    @test nbandsalg.n_bands_compute < n_bands_guess
+    scfres = self_consistent_field(basis; tol, ψ, nbandsalg)
+    @test scfres.converged
+    @test all(ψk -> size(ψk, 2) == nbandsalg.n_bands_compute, scfres.ψ)
+
+    nbandsalg = AdaptiveBands(model; n_bands_converge=4)
+    @test nbandsalg.n_bands_compute < n_bands_guess
+    n_bands_first = Ref(0)
+    callback = info -> (iszero(n_bands_first[]) && (n_bands_first[] = size(info.ψ[1], 2)))
+    scfres = self_consistent_field(basis; tol, ψ, nbandsalg, callback)
+    @test scfres.converged
+    @test n_bands_first[] == nbandsalg.n_bands_compute
+end

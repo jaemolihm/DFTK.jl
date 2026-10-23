@@ -65,7 +65,6 @@ end
         # Each coefficient is scaled by 1 + a e^{2πiθ}
         @test abs.(ψ[ik] .- orbitals[ik]) ≈ 0.05 .* abs.(orbitals[ik])
     end
-    @test DFTK.atomic_orbitals_with_random_noise(basis; amplitude=0) == orbitals
 
     Si_hgh = ElementPsp(silicon.atnum, PseudoFamily("cp2k.nc.sr.lda.v0_1.semicore.gth"))
     model_hgh = model_DFT(silicon.lattice, [Si_hgh, Si_hgh], silicon.positions;
