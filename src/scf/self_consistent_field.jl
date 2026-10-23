@@ -84,13 +84,12 @@ function next_density(ham::Hamiltonian,
                       eigensolver=lobpcg_hyper, ψ=nothing, eigenvalues=nothing,
                       occupation=nothing, kwargs...)
     n_bands_converge, n_bands_compute = determine_n_bands(nbandsalg, occupation,
-                                                          eigenvalues, ψ)
+                                                          eigenvalues)
 
     if isnothing(ψ)
         increased_n_bands = true
     else
         @assert length(ψ) == length(ham.basis.kpoints)
-        n_bands_compute = max(n_bands_compute, maximum(ψk -> size(ψk, 2), ψ))
         increased_n_bands = n_bands_compute > size(ψ[1], 2)
     end
 
