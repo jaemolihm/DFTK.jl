@@ -90,7 +90,6 @@ function next_density(ham::Hamiltonian,
         increased_n_bands = true
     else
         @assert length(ψ) == length(ham.basis.kpoints)
-        n_bands_compute = max(n_bands_compute, maximum(ψk -> size(ψk, 2), ψ))
         increased_n_bands = n_bands_compute > size(ψ[1], 2)
     end
 
