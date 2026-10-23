@@ -5,6 +5,10 @@ is true and if no guesses are given. `eigensolver` is the iterative eigensolver
 that really does the work, operating on a single ``k``-Block.
 `eigensolver` should support the API `eigensolver(A, X0; prec, tol, maxiter)`
 `prec_type` should be a function that returns a preconditioner when called as `prec(ham, kpt)`
+
+A guess `ψguess[ik]` with more than `nev_per_kpoint` columns is reduced by Rayleigh–Ritz
+in its span to the `nev_per_kpoint` lowest Ritz vectors; one with fewer columns is padded
+with random vectors.
 """
 function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::Int;
                                  ψguess=nothing,
@@ -12,6 +16,7 @@ function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::
                                  tol=1e-6, miniter=1, maxiter=100, n_conv_check=nothing)
     kpoints = ham.basis.kpoints
     results = Vector{Any}(undef, length(kpoints))
+    n_matvec_guess = 0
 
     for (ik, kpt) in enumerate(kpoints)
         n_Gk = length(G_vectors(ham.basis, kpt))
@@ -26,8 +31,17 @@ function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::
                       "Hamiltonian ($n_Gk)")
             end
             nev_guess = size(ψguess[ik], 2)
+            if nev_guess > n_Gk
+                error("The guess has $nev_guess columns, more than the size of the plane " *
+                      "wave basis ($n_Gk). Increase Ecut or pass fewer guess orbitals.")
+            end
             if nev_guess > nev_per_kpoint
-                ψguessk = ψguess[ik][:, 1:nev_per_kpoint]
+                # Rayleigh–Ritz in the span of the guess: keep the lowest nev_per_kpoint
+                Q = ortho_qr(ψguess[ik])
+                HQ = ham[ik] * Q
+                n_matvec_guess += size(Q, 2)
+                V = eigen(Hermitian(Q' * HQ)).vectors
+                ψguessk = Q * V[:, 1:nev_per_kpoint]
             elseif nev_guess == nev_per_kpoint
                 ψguessk = ψguess[ik]
             else
@@ -61,7 +75,7 @@ function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::
      residual_norms=[res.residual_norms for res in results],
      n_iter=[res.n_iter for res in results],
      converged=all(res.converged for res in results),
-     n_matvec=sum(res.n_matvec for res in results))
+     n_matvec=n_matvec_guess + sum(res.n_matvec for res in results))
 end
 
 @doc raw"""

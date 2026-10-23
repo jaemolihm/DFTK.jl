@@ -121,6 +121,37 @@ end
     end
 end
 
+@testitem "Diagonalization with an oversized guess" setup=[TestCases] begin
+    using DFTK
+    using PseudoPotentialData
+    silicon = TestCases.silicon
+
+    Si = ElementPsp(silicon.atnum, PseudoFamily("cp2k.nc.sr.lda.v0_1.semicore.gth"))
+    model = model_DFT(silicon.lattice, [Si, Si], silicon.positions;
+                      functionals=[:lda_xc_teter93])
+    basis = PlaneWaveBasis(model; Ecut=5, silicon.kgrid)
+    ham = Hamiltonian(basis; ρ=guess_density(basis))
+
+    nev = 6
+    ref = diagonalize_all_kblocks(lobpcg_hyper, ham, 2nev; tol=1e-10)
+    # Exact eigenvectors with the lowest nev in the last columns: keeping the first nev
+    # columns would converge to bands nev+1:2nev, Rayleigh–Ritz finds the lowest nev.
+    ψguess = [hcat(X[:, nev+1:2nev], X[:, 1:nev]) for X in ref.X]
+    res = diagonalize_all_kblocks(lobpcg_hyper, ham, nev; tol=1e-8, ψguess)
+    @test res.converged
+    @test all(==(1), res.n_iter)
+    for ik = 1:length(basis.kpoints)
+        @test size(res.X[ik], 2) == nev
+        @test res.λ[ik] ≈ ref.λ[ik][1:nev] atol=1e-8
+    end
+
+    n_Gk = length(G_vectors(basis, basis.kpoints[1]))
+    ψguess_large = [randn(ComplexF64, length(G_vectors(basis, kpt)), n_Gk + 1)
+                    for kpt in basis.kpoints]
+    @test_throws ErrorException diagonalize_all_kblocks(lobpcg_hyper, ham, nev;
+                                                        ψguess=ψguess_large)
+end
+
 # The LOBPCG-internal unit tests (LazyHcat data structures, print callback, and standalone
 # diagonalization of dense matrices) now live in the LOBPCGEigensolver.jl package.
 # The tests kept here exercise DFTK's k-block diagonalization machinery on actual
