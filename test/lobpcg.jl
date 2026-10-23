@@ -133,14 +133,23 @@ end
     ham = Hamiltonian(basis; ρ=guess_density(basis))
 
     nev = 6
-    ψguess = DFTK.random_orbitals(basis, 2nev)
-    res_random = diagonalize_all_kblocks(lobpcg_hyper, ham, nev; tol=1e-8)
-    res_large  = diagonalize_all_kblocks(lobpcg_hyper, ham, nev; tol=1e-8, ψguess)
-    @test res_large.converged
+    ref = diagonalize_all_kblocks(lobpcg_hyper, ham, 2nev; tol=1e-10)
+    # Exact eigenvectors with the lowest nev in the last columns: keeping the first nev
+    # columns would converge to bands nev+1:2nev, Rayleigh–Ritz finds the lowest nev.
+    ψguess = [hcat(X[:, nev+1:2nev], X[:, 1:nev]) for X in ref.X]
+    res = diagonalize_all_kblocks(lobpcg_hyper, ham, nev; tol=1e-8, ψguess)
+    @test res.converged
+    @test all(==(1), res.n_iter)
     for ik = 1:length(basis.kpoints)
-        @test size(res_large.X[ik], 2) == nev
-        @test res_large.λ[ik] ≈ res_random.λ[ik] atol=1e-7
+        @test size(res.X[ik], 2) == nev
+        @test res.λ[ik] ≈ ref.λ[ik][1:nev] atol=1e-8
     end
+
+    n_Gk = length(G_vectors(basis, basis.kpoints[1]))
+    ψguess_large = [randn(ComplexF64, length(G_vectors(basis, kpt)), n_Gk + 1)
+                    for kpt in basis.kpoints]
+    @test_throws ErrorException diagonalize_all_kblocks(lobpcg_hyper, ham, nev;
+                                                        ψguess=ψguess_large)
 end
 
 # The LOBPCG-internal unit tests (LazyHcat data structures, print callback, and standalone

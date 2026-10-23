@@ -48,9 +48,13 @@ end
     @test all(ψk -> size(ψk, 2) == nbandsalg.n_bands_compute, scfres.ψ)
     @test scfres.energies.total ≈ scfres_ref.energies.total atol=10tol
 
+    # The first SCF step computes n_bands_compute bands, not one per guess column
     nbandsalg = AdaptiveBands(model; n_bands_converge=4)
     @test nbandsalg.n_bands_compute < n_bands_guess
-    scfres = self_consistent_field(basis; tol, ψ, nbandsalg)
+    n_bands_first = Ref(0)
+    callback = info -> (iszero(n_bands_first[]) && (n_bands_first[] = size(info.ψ[1], 2)))
+    scfres = self_consistent_field(basis; tol, ψ, nbandsalg, callback)
+    @test n_bands_first[] == nbandsalg.n_bands_compute
     @test all(ψk -> size(ψk, 2) ≥ nbandsalg.n_bands_compute, scfres.ψ)
     @test scfres.energies.total ≈ scfres_ref.energies.total atol=10tol
 end

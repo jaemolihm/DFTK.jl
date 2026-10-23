@@ -104,6 +104,10 @@ Returns for each k-point all orbitals (`n_G × n_orbitals`), neither orthogonali
 truncated. `diagonalize_all_kblocks` reduces a guess with more columns than the
 requested number of bands by Rayleigh–Ritz in its span, and pads one with fewer columns
 with random vectors. Errors if a pseudopotential has no pseudo-atomic wavefunctions.
+
+The random factors are drawn from the task-local RNG at the time of the call, before
+`self_consistent_field` seeds it with its `seed` keyword; for a reproducible guess call
+`Random.seed!` first.
 """
 function atomic_random_initial_guess(basis::PlaneWaveBasis{T}; amplitude=0.05) where {T}
     for atom in basis.model.atoms

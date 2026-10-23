@@ -31,6 +31,10 @@ function diagonalize_all_kblocks(eigensolver, ham::Hamiltonian, nev_per_kpoint::
                       "Hamiltonian ($n_Gk)")
             end
             nev_guess = size(ψguess[ik], 2)
+            if nev_guess > n_Gk
+                error("The guess has $nev_guess columns, more than the size of the plane " *
+                      "wave basis ($n_Gk). Increase Ecut or pass fewer guess orbitals.")
+            end
             if nev_guess > nev_per_kpoint
                 # Rayleigh–Ritz in the span of the guess: keep the lowest nev_per_kpoint
                 Q = ortho_qr(ψguess[ik])
