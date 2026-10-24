@@ -733,7 +733,8 @@ end
 
 function determine_band_tolerances(alg, density_tol)
     map(alg.bandtol_factors) do fac_k
-        # fac = Inf on a k-point copy of zero weight; Inf * 0 would give a NaN tolerance
+        # fac ∝ 1/w_k (construct_bandtol) is Inf on a k-point copy (w_k = 0), whose δψ does
+        # not enter δρ; Inf * density_tol would be NaN for density_tol = 0
         map(fac -> isinf(fac) ? alg.bandtol_max :
                    clamp(fac * density_tol, alg.bandtol_min, alg.bandtol_max), fac_k)
     end
