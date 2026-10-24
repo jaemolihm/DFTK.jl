@@ -52,7 +52,6 @@
         for ik = 1:length(basis.kpoints)
             @test ref_λ[basis.krange_thisproc_allspin[ik]] ≈ res.λ[ik]
             @test max_residual(res, ik) < tol
-            # At k = [1/3, 1/3, 0] band 10 is 0.06 Ha below band 11: up to 56 iterations
             @test res.n_iter[ik] < 60
         end
     end
