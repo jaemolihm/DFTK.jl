@@ -704,6 +704,8 @@ function construct_bandtol(Bandtol::Type, basis::PlaneWaveBasis, ψ, occupation:
         orbital_term = adaptive_bandtol_orbital_term_(Bandtol, basis, basis.kpoints[ik],
                                                       ψ[ik], mask_occ[ik])
         map(mask_occ[ik]) do n
+            # A k-point copy (zero weight) does not enter δρ: no accuracy needed
+            iszero(basis.kweights[ik]) && return T(Inf)
             (  (sqrt(Ω/Ng) / sqrt(length(mask_occ[ik])) / orbital_term)
              / (2 * occupation[ik][n] * Nk * basis.kweights[ik]))
         end
@@ -733,6 +735,9 @@ end
 
 function determine_band_tolerances(alg, density_tol)
     map(alg.bandtol_factors) do fac_k
-        clamp.(fac_k .* density_tol, alg.bandtol_min, alg.bandtol_max)
+        # fac = Inf on a k-point copy (construct_bandtol); Inf * density_tol would be NaN
+        # for density_tol = 0
+        map(fac -> isinf(fac) ? alg.bandtol_max :
+                   clamp(fac * density_tol, alg.bandtol_min, alg.bandtol_max), fac_k)
     end
 end
