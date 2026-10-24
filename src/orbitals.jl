@@ -90,3 +90,32 @@ function random_orbitals(basis::AbstractBasis, howmany::Integer)
         random_orbitals(basis, kpt, howmany)
     end
 end
+
+@doc raw"""
+    atomic_orbitals_with_random_noise(basis; amplitude=0.05)
+
+Initial guess for the orbitals from all pseudo-atomic orbitals of the pseudopotentials,
+with each plane-wave coefficient multiplied by a random complex number
+``1 + a e^{2πiθ}`` with ``a`` = `amplitude` and ``θ`` uniform in ``[0, 1)``.
+Similar to the `startingwfc = 'atomic+random'` guess of Quantum ESPRESSO, which also
+scales ``a`` by a random factor in ``[0, 1)``.
+
+Returns for each k-point all orbitals (`n_G × n_orbitals`), not orthogonalized.
+Errors if a pseudopotential has no pseudo-atomic wavefunctions.
+"""
+function atomic_orbitals_with_random_noise(basis::PlaneWaveBasis{T};
+                                           amplitude=0.05) where {T}
+    for atom in basis.model.atoms
+        if !(atom isa ElementPsp && atom.psp isa PspUpf && count_n_pswfc(atom.psp) > 0)
+            error("atomic_orbitals_with_random_noise needs pseudo-atomic wavefunctions, " *
+                  "but the pseudopotential of $atom has none. Use a UPF pseudopotential " *
+                  "with PP_PSWFC or a random guess (ψ=nothing).")
+        end
+    end
+    (; orbitals) = _atomic_orbitals_nonorthogonal(basis)
+    map(orbitals) do Φk_cpu
+        Φk = to_device(basis.architecture, Φk_cpu)
+        θ = rand!(TaskLocalRNG(), similar(Φk, T))
+        Φk .* (1 .+ T(amplitude) .* cis2pi.(θ))
+    end
+end
