@@ -65,7 +65,7 @@ struct PlaneWaveBasis{T,
     kweights_global::Vector{T}
 
     # Number of irreducible k-points in the basis. If there are more MPI ranks than irreducible
-    # k-points, some are duplicated over the MPI ranks (with adjusted weight). In such a case
+    # k-points, some are duplicated over the MPI ranks (with zero weight). In such a case
     # n_irreducible_kpoints < length(kcoords_global)
     n_irreducible_kpoints::Int
 
@@ -174,8 +174,9 @@ function PlaneWaveBasis(model::Model{T}, Ecut::Real, fft_size::Tuple{Int, Int, I
 
     # Init MPI, and store MPI-global values for reference
     MPI.Init()
-    kcoords_global  = convert(Vector{Vec3{T}}, kdata.kcoords)
-    kweights_global = convert(Vector{T},       kdata.kweights)
+    # Copies: the k-point duplication below must not modify the arrays of `kgrid`
+    kcoords_global  = convert(Vector{Vec3{T}}, copy(kdata.kcoords))
+    kweights_global = convert(Vector{T},       copy(kdata.kweights))
 
     # Setup FFT plans
     fft_grid = FFTGrid(fft_size, model.unit_cell_volume, architecture) 
@@ -188,18 +189,24 @@ function PlaneWaveBasis(model::Model{T}, Ecut::Real, fft_size::Tuple{Int, Int, I
     n_irreducible_kpoints = n_kpt
 
     # The code cannot handle MPI ranks without k-points. If there are more prcocesses
-    # than k-points, we duplicate k-points with the highest weight on the empty MPI
-    # ranks (and scale the weight accordingly)
+    # than k-points, we duplicate k-points on the empty MPI ranks. A copy has weight zero
+    # and the original keeps its weight: each copy diagonalizes its own Hamiltonian, so
+    # with a share of the weight the copies would enter sums over k with eigenvectors
+    # that differ by the solver tolerance. The k-point to duplicate is the one with the
+    # highest weight after halving at each duplication, as when copies shared the weight,
+    # so that the k-point layout over the ranks is unchanged.
     if n_procs > n_kpt
+        split_weights = copy(kweights_global)
         for i in n_kpt+1:n_procs
-            idx = argmax(kweights_global)
-            kweights_global[idx] *= 0.5
-            push!(kweights_global, kweights_global[idx])
+            idx = argmax(split_weights)
+            split_weights[idx] *= 0.5
+            push!(split_weights, split_weights[idx])
+            push!(kweights_global, zero(T))
             push!(kcoords_global, kcoords_global[idx])
         end
         @warn("Attempting to parallelize $n_kpt k-points over $n_procs MPI ranks. " *
               "DFTK does not support processes empty of k-point. Some k-points were " *
-              "duplicated over the extra ranks with scaled weights.")
+              "duplicated over the extra ranks with zero weight.")
     end
     n_kpt = length(kcoords_global)
 
@@ -514,25 +521,9 @@ function irreducible_kcoords_global(basis::PlaneWaveBasis)
     basis.kcoords_global[1:basis.n_irreducible_kpoints]
 end
 
-function irreducible_kweights_global(basis::PlaneWaveBasis{T}) where {T}
-    function same_kpoint(i_irr, i_dupl)
-        maximum(abs, basis.kcoords_global[i_dupl]-basis.kcoords_global[i_irr]) < eps(T)
-    end
-
-    # Check that weights add up to 1 on entry (non spin doubled k-points)
-    @assert sum(basis.kweights_global) ≈ 1
-
-    # Assume that duplicated k-points are appended at the end of the kcoords array
+function irreducible_kweights_global(basis::PlaneWaveBasis)
+    # Duplicated k-points are appended at the end of the kweights array, with zero weight
     irr_kweights = basis.kweights_global[1:basis.n_irreducible_kpoints]
-    for i_dupl = basis.n_irreducible_kpoints+1:length(basis.kweights_global)
-        for i_irr = 1:basis.n_irreducible_kpoints
-            if same_kpoint(i_irr, i_dupl)
-                irr_kweights[i_irr] += basis.kweights_global[i_dupl]
-                break
-            end
-        end
-    end
-
     # Test that irreducible weight add up to 1 (non spin doubled k-points)
     @assert sum(irr_kweights) ≈ 1
     irr_kweights

@@ -23,9 +23,11 @@
 
     for (ik, kpt) in enumerate(basis.kpoints)
         kpt = basis.kpoints[ik]
-        ikmod = mod1(basis.krange_thisproc_allspin[ik], length(silicon.kgrid.kcoords))
-        @test kpt.coordinate     == silicon.kgrid.kcoords[ikmod]
-        @test basis.kweights[ik] == silicon.kgrid.kweights[ikmod]
+        # Global index without spin; copies (more MPI ranks than k-points) have weight 0
+        ikmod = mod1(basis.krange_thisproc_allspin[ik], length(basis.kcoords_global))
+        @test kpt.coordinate == basis.kcoords_global[ikmod]
+        @test basis.kweights[ik] == (ikmod ≤ basis.n_irreducible_kpoints ?
+                                     silicon.kgrid.kweights[ikmod] : 0)
         for (ig, G) in enumerate(G_vectors(basis, kpt))
             @test g_start <= G <= g_stop
         end
@@ -171,4 +173,30 @@ end
         basis = PlaneWaveBasis(model; Ecut=10)  # This should work fine
         @test basis.Ecut == 10.0
     end
+end
+
+@testitem "PlaneWaveBasis: k-point copies on extra MPI ranks have zero weight" #=
+    =#    setup=[TestCases] begin
+    using DFTK
+    using MPI
+    silicon = TestCases.silicon
+
+    # One k-point: every MPI rank beyond the first holds a copy of it
+    model = model_DFT(silicon.lattice, silicon.atoms, silicon.positions; functionals=LDA())
+    kgrid = ExplicitKpoints([[0.25, 0.25, 0.25]])
+    basis = PlaneWaveBasis(model; Ecut=5, kgrid)
+    basis_ref = PlaneWaveBasis(model; Ecut=5, kgrid, comm_kpts=MPI.COMM_SELF)
+
+    @test length(kgrid.kcoords) == length(kgrid.kweights) == 1  # kgrid is not modified
+    n_irred = basis.n_irreducible_kpoints
+    @test n_irred == 1
+    @test length(basis.kcoords_global) == max(1, DFTK.mpi_nprocs(basis.comm_kpts))
+    @test basis.kweights_global[1:n_irred] == basis_ref.kweights_global
+    @test all(iszero, basis.kweights_global[n_irred+1:end])
+    @test DFTK.irreducible_kweights_global(basis) == basis_ref.kweights_global
+
+    tol = 1e-10
+    E = self_consistent_field(basis; tol).energies.total
+    E_ref = self_consistent_field(basis_ref; tol).energies.total
+    @test E ≈ E_ref atol=1e-8
 end
