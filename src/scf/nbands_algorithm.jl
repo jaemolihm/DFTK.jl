@@ -28,7 +28,7 @@ function FixedBands(model::Model{T}; temperature_factor_converge=1.20) where {T}
     FixedBands(; n_bands_converge, n_bands_compute=n_bands_converge + 3,
                occupation_threshold=default_occupation_threshold(T))
 end
-function determine_n_bands(bands::FixedBands, occupation, eigenvalues, ψ)
+function determine_n_bands(bands::FixedBands, occupation, eigenvalues)
     (; bands.n_bands_converge, bands.n_bands_compute)
 end
 
@@ -66,12 +66,8 @@ function AdaptiveBands(model::Model{T};
     AdaptiveBands(; n_bands_converge, n_bands_compute, occupation_threshold, kwargs...)
 end
 
-function determine_n_bands(bands::AdaptiveBands, occupation::Nothing, eigenvalues, ψ)
-    if isnothing(ψ)
-        n_bands_compute = bands.n_bands_compute
-    else
-        n_bands_compute = max(bands.n_bands_compute, maximum(ψk -> size(ψk, 2), ψ))
-    end
+function determine_n_bands(bands::AdaptiveBands, occupation::Nothing, eigenvalues)
+    n_bands_compute = bands.n_bands_compute
     # Boost number of bands to converge temporarily for the next SCF step to have more
     # information around after the next step and to thus make a better decision
     # on the number of bands we actually care about. Note that this is temporary, since
@@ -80,7 +76,7 @@ function determine_n_bands(bands::AdaptiveBands, occupation::Nothing, eigenvalue
     @debug "determine_n_bands" n_bands_converge n_bands_compute
     (; n_bands_converge, n_bands_compute)
 end
-function determine_n_bands(bands::AdaptiveBands, occupation::AbstractVector, eigenvalues, ψ)
+function determine_n_bands(bands::AdaptiveBands, occupation::AbstractVector, eigenvalues)
     # Determine number of bands to be actually converged
     # Bring occupation on the CPU, or findlast will fail
     occupation = [to_cpu(occk) for occk in occupation]
@@ -101,10 +97,6 @@ function determine_n_bands(bands::AdaptiveBands, occupation::AbstractVector, eig
         end
     end
     n_bands_compute = max(bands.n_bands_compute, n_bands_compute_ε, n_bands_converge + 3)
-
-    if !isnothing(ψ)
-        n_bands_compute = max(n_bands_compute, maximum(ψk -> size(ψk, 2), ψ))
-    end
     @debug "determine_n_bands" n_bands_converge n_bands_compute n_bands_occ n_bands_compute_ε
     (; n_bands_converge, n_bands_compute)
 end
