@@ -1,5 +1,6 @@
 @testitem "Diagonalization of a free-electron Hamiltonian" setup=[TestCases] begin
     using DFTK
+    using LinearAlgebra
     silicon = TestCases.silicon
 
     # Construct a free-electron Hamiltonian
@@ -21,6 +22,14 @@
          0.66631039803, 0.72877699784, 0.72877699784, 0.72877699784, 0.72877699784],
     ]
 
+    # Residuals recomputed from the returned vectors: LOBPCG reports 0 for the vectors it
+    # locked before its last iteration. All nev_per_k vectors are locked (residual < tol)
+    # before LOBPCG returns, and locked vectors are not changed afterwards.
+    function max_residual(res, ik)
+        X = res.X[ik]
+        maximum(norm.(eachcol(ham.blocks[ik] * X - X * Diagonal(res.λ[ik]))))
+    end
+
     @test length(ref_λ) == length(silicon.kgrid)
     @testset "without Preconditioner" begin
         res = diagonalize_all_kblocks(lobpcg_hyper, ham, nev_per_k; tol=1e-4,
@@ -29,7 +38,7 @@
         @test res.converged
         for ik = 1:length(basis.kpoints)
             @test ref_λ[basis.krange_thisproc_allspin[ik]] ≈ res.λ[ik] atol = 1e-4
-            @test maximum(res.residual_norms[ik]) < 1e-4
+            @test max_residual(res, ik) < 1e-4
             @test res.n_iter[ik] < 200
         end
     end
@@ -42,8 +51,8 @@
         @test res.converged
         for ik = 1:length(basis.kpoints)
             @test ref_λ[basis.krange_thisproc_allspin[ik]] ≈ res.λ[ik]
-            @test maximum(res.residual_norms[ik]) < 100tol  # TODO Why the 100?
-            @test res.n_iter[ik] < 50
+            @test max_residual(res, ik) < tol
+            @test res.n_iter[ik] < 60
         end
     end
 end
