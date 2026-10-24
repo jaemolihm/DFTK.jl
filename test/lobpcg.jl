@@ -1,5 +1,6 @@
 @testitem "Diagonalization of a free-electron Hamiltonian" setup=[TestCases] begin
     using DFTK
+    using LinearAlgebra
     silicon = TestCases.silicon
 
     # Construct a free-electron Hamiltonian
@@ -9,7 +10,10 @@
     ham = Hamiltonian(basis)
 
     tol = 1e-8
+    # Compute 4 bands more than checked: at k = [1/3, 1/3, 0] band 10 ends a cluster only
+    # 0.06 Ha below band 11, which makes LOBPCG slow when band 10 is the last computed one
     nev_per_k = 10
+    n_bands_compute = nev_per_k + 4
     ref_λ = [
         [0.00000000000, 0.56219939834, 0.56219939834, 0.56219939834, 0.56219939834,
          0.56219939834, 0.56219939834, 0.56219939834, 0.56219939834, 0.74959919778],
@@ -21,28 +25,39 @@
          0.66631039803, 0.72877699784, 0.72877699784, 0.72877699784, 0.72877699784],
     ]
 
+    # Residuals are recomputed from the returned vectors, because LOBPCG reports 0 for the
+    # vectors it locked before its last iteration. A converged vector has a residual below
+    # tol, but when band 10 cuts a degenerate cluster a still active member of the cluster
+    # can be sorted into the first 10 (seen at 1.24tol); hence the bound 10tol.
+    function max_residual(res, ik)
+        X = res.X[ik][:, 1:nev_per_k]
+        maximum(norm.(eachcol(ham.blocks[ik] * X - X * Diagonal(res.λ[ik][1:nev_per_k]))))
+    end
+
     @test length(ref_λ) == length(silicon.kgrid)
     @testset "without Preconditioner" begin
-        res = diagonalize_all_kblocks(lobpcg_hyper, ham, nev_per_k; tol=1e-4,
-                                      prec_type=nothing, interpolate_kpoints=false)
+        res = diagonalize_all_kblocks(lobpcg_hyper, ham, n_bands_compute; tol=1e-4,
+                                      prec_type=nothing, interpolate_kpoints=false,
+                                      n_conv_check=nev_per_k)
 
         @test res.converged
         for ik = 1:length(basis.kpoints)
-            @test ref_λ[basis.krange_thisproc_allspin[ik]] ≈ res.λ[ik] atol = 1e-4
-            @test maximum(res.residual_norms[ik]) < 1e-4
+            λk = res.λ[ik][1:nev_per_k]
+            @test ref_λ[basis.krange_thisproc_allspin[ik]] ≈ λk atol = 1e-4
+            @test max_residual(res, ik) < 10 * 1e-4
             @test res.n_iter[ik] < 200
         end
     end
 
     @testset "with Preconditioner" begin
-        res = diagonalize_all_kblocks(lobpcg_hyper, ham, nev_per_k; tol,
+        res = diagonalize_all_kblocks(lobpcg_hyper, ham, n_bands_compute; tol,
                                       prec_type=PreconditionerTPA,
-                                      interpolate_kpoints=false)
+                                      interpolate_kpoints=false, n_conv_check=nev_per_k)
 
         @test res.converged
         for ik = 1:length(basis.kpoints)
-            @test ref_λ[basis.krange_thisproc_allspin[ik]] ≈ res.λ[ik]
-            @test maximum(res.residual_norms[ik]) < 100tol  # TODO Why the 100?
+            @test ref_λ[basis.krange_thisproc_allspin[ik]] ≈ res.λ[ik][1:nev_per_k]
+            @test max_residual(res, ik) < 10tol
             @test res.n_iter[ik] < 50
         end
     end
