@@ -301,6 +301,8 @@ end
 function __init__()
     # Reset timer; otherwise the starting time is the time of precompilation
     reset_timer!(timer)
+    # Likewise, otherwise the number of DFTK threads is that of the precompiling process (1)
+    DFTK_threads[] = Threads.nthreads()
 end
 
 end # module DFTK
