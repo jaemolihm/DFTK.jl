@@ -154,7 +154,7 @@ To use thread-based parallelism proceed as follows:
    setup_threading()
    ```
    This disables FFT threading and sets the number of
-   BLAS threads to the number of Julia threads.
+   BLAS and DFTK threads to the number of Julia threads.
 
 2. Run Julia passing the desired number of threads using the flag `-t`:
    ```sh
@@ -205,6 +205,8 @@ to set an upper bound to the number of threads used by DFTK,
 regardless of `Threads.nthreads()` (for instance, if you want to
 thread several DFTK runs and don't want DFTK's threading to
 interfere with that).
+If `setup_threading()` is not called, then DFTK uses a single thread for these
+loops, even if Julia is started with `julia -t N`.
 
 ### FFT threads
 Since FFT threading is only used in DFTK inside the regions already parallelized
