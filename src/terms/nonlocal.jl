@@ -87,6 +87,7 @@ end
                 DPψk = D * (P' * ψ[ik])  # nproj x nband
 
                 # dE/dR_α = Σ_n f_n 2 Re ⟨ψ_n|∂_α P D P'|ψ_n⟩, contracted in projector space
+                # (equal to the conjugated order since D is real symmetric)
                 forces[idx] += map(1:3) do α
                     map!(p -> -2π*im*p[α], twoπp, G_plus_k)
                     dPdR .= twoπp .* P

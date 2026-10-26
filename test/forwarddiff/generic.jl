@@ -103,15 +103,28 @@ end
     Tg = ForwardDiff.Tag{typeof(sin), Float64}
     dual(x) = ForwardDiff.Dual{Tg}(x, randn(), randn())
     for T in (Float64, ComplexF64)
-        A = T <: Complex ? Complex.(dual.(randn(7, 4)), dual.(randn(7, 4))) : dual.(randn(7, 4))
+        A = T <: Complex ? Complex.(dual.(randn(7, 4)), dual.(randn(7, 4))) :
+                           dual.(randn(7, 4))
+        A_val = ForwardDiff.value.(A)
+        A_part(p) = ForwardDiff.partials.(A, p)
         B = randn(T, 7, 3)
+        E = randn(T, 3, 4)
         for wrap in (adjoint, transpose)
-            C = wrap(A) * B
-            @test ForwardDiff.value.(C) ≈ wrap(ForwardDiff.value.(A)) * B
+            @test DFTK.dual_matrix_value_and_partials(wrap(A), 2)[1] isa typeof(wrap(A_val))
+            C = wrap(A) * B   # wrapped Dual matrix on the left
+            D = E * wrap(A)   # on the right
+            @test ForwardDiff.value.(C) ≈ wrap(A_val) * B
+            @test ForwardDiff.value.(D) ≈ E * wrap(A_val)
             for p = 1:2
-                @test ForwardDiff.partials.(C, p) ≈ wrap(ForwardDiff.partials.(A, p)) * B
+                @test ForwardDiff.partials.(C, p) ≈ wrap(A_part(p)) * B
+                @test ForwardDiff.partials.(D, p) ≈ E * wrap(A_part(p))
             end
         end
+        # the adjoint of a Dual vector takes the plain split (its parent is not a matrix)
+        x = A[:, 1]
+        C = similar(A, 1, 3)
+        mul!(C, x', B)
+        @test ForwardDiff.value.(C) ≈ A_val[:, 1]' * B
     end
 end
 @testitem "Derivative of matrix functions with degenerate eigenvalues" #=

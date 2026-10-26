@@ -16,14 +16,18 @@ const ScalingFactor = Union{Integer, Complex{<:Integer}, ScalarEltype}
 function dual_matrix_value_and_partials(A::AbstractMatrix{<:DualEltype{T,V,N}}, npartials::Int) where {T,V,N}
     (ForwardDiff.value.(A), ntuple(p -> ForwardDiff.partials.(A, p), npartials))
 end
-# Split the parent of an adjoint or transpose, which is contiguous in memory, and wrap the
-# parts again: value and partials of conj(z) are the conjugates of those of z.
-function dual_matrix_value_and_partials(A::Union{Adjoint{<:DualEltype{T,V,N}},
-                                                 Transpose{<:DualEltype{T,V,N}}},
-                                        npartials::Int) where {T,V,N}
-    wrap = A isa Adjoint ? adjoint : transpose
+# For A' and transpose(A), split the parent (a broadcast through the wrapper reads it
+# strided) and wrap the parts again, so BLAS gets the 'C'/'T' flag. Value and partials of
+# conj(z) are the conjugates of those of z.
+function dual_matrix_value_and_partials(A::Adjoint{<:DualEltype, <:AbstractMatrix},
+                                        npartials::Int)
     A_val, A_parts = dual_matrix_value_and_partials(parent(A), npartials)
-    (wrap(A_val), map(wrap, A_parts))
+    (adjoint(A_val), map(adjoint, A_parts))
+end
+function dual_matrix_value_and_partials(A::Transpose{<:DualEltype, <:AbstractMatrix},
+                                        npartials::Int)
+    A_val, A_parts = dual_matrix_value_and_partials(parent(A), npartials)
+    (transpose(A_val), map(transpose, A_parts))
 end
 function dual_matrix_value_and_partials(A::AbstractMatrix, npartials::Int)
     (A, ntuple(_ -> nothing, npartials))

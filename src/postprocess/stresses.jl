@@ -28,7 +28,8 @@ for details. In Voigt notation one would use the vector
 @timing function compute_stresses_cart(scfres)
     # At fixed ψ (coefficients on the reduced G vectors) the strain changes the density on
     # the reduced real-space grid only through the 1/√Ω normalisation of ψ(x):
-    # ρ_ε(x) = ρ(x) Ω / Ω_ε.
+    # ρ_ε(x) = ρ(x) Ω / Ω_ε, since the strained basis keeps the k-points, k-weights and
+    # symmetries of `scfres.basis`.
     ρ_unstrained = compute_density(scfres.basis, scfres.ψ, scfres.occupation)
 
     # compute the Hellmann-Feynman energy (with fixed ψ/occ/ρ)
@@ -54,8 +55,8 @@ for details. In Voigt notation one would use the vector
     # conversion from Voigt strain to 3x3 strain adds the ones on the diagonal
     f = v -> HF_energy(voigt_strain_to_full(v) * L)
     x = zeros(eltype(L), 6)
-    # All 6 strains in one dual pass, so that the strained basis (in particular the nonlocal
-    # projectors of every k-point, then stored with 7 components) is built only once
+    # All 6 strains in one dual pass, so that the strained basis is built only once. Memory:
+    # its nonlocal projectors (all local k-points) are stored with 7 components instead of 2.
     config = ForwardDiff.GradientConfig(f, x, ForwardDiff.Chunk{6}())
     stress_voigt = 1/Ω * ForwardDiff.gradient(f, x, config)::Vector{eltype(L)}
     symmetrize_stresses(scfres.basis, voigt_stress_to_full(stress_voigt))
