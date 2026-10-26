@@ -75,7 +75,6 @@ end
 
             # Pre-allocation of large arrays (Noticable performance improvements on
             # CPU and GPU here)
-            δHψk  = similar(ψ[ik])
             P     = similar(form_factors)
             dPdR  = similar(form_factors)
             twoπp = similar(form_factors, length(G_plus_k))
@@ -85,12 +84,14 @@ end
                 r = model.positions[idx]
                 map!(p -> cis2pi(-dot(p, r)), structure_factors, G_plus_k)
                 P .= structure_factors .* form_factors ./ sqrt(unit_cell_volume)
+                DPψk = D * (P' * ψ[ik])  # nproj x nband
 
+                # dE/dR_α = Σ_n f_n 2 Re ⟨ψ_n|∂_α P D P'|ψ_n⟩, contracted in projector space
                 forces[idx] += map(1:3) do α
                     map!(p -> -2π*im*p[α], twoπp, G_plus_k)
                     dPdR .= twoπp .* P
-                    mul!(δHψk, P, D * (dPdR' * ψ[ik]))
-                    -basis.kweights[ik]*sum(occupation[ik] .* 2vec(real(columnwise_dots(ψ[ik], δHψk))))
+                    dPψk = dPdR' * ψ[ik]
+                    -basis.kweights[ik]*sum(occupation[ik] .* 2vec(real(columnwise_dots(dPψk, DPψk))))
                 end  # α
             end  # r
         end  # kpt
