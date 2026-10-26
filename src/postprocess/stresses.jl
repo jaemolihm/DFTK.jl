@@ -26,12 +26,17 @@ for details. In Voigt notation one would use the vector
     of the physical model. See also the discussion in [`compute_forces`](@ref).
 """
 @timing function compute_stresses_cart(scfres)
+    # At fixed ψ (coefficients on the reduced G vectors) the strain changes the density on
+    # the reduced real-space grid only through the 1/√Ω normalisation of ψ(x):
+    # ρ_ε(x) = ρ(x) Ω / Ω_ε.
+    ρ_unstrained = compute_density(scfres.basis, scfres.ψ, scfres.occupation)
+
     # compute the Hellmann-Feynman energy (with fixed ψ/occ/ρ)
     function HF_energy(lattice)
         basis = scfres.basis
         new_model = Model(basis.model; lattice)
         new_basis = PlaneWaveBasis(basis; model=new_model)
-        ρ = compute_density(new_basis, scfres.ψ, scfres.occupation)
+        ρ = ρ_unstrained .* (basis.model.unit_cell_volume / new_model.unit_cell_volume)
         τ = nothing
         if any(needs_τ, basis.terms)
             τ = compute_kinetic_energy_density(new_basis, scfres.ψ, scfres.occupation)
@@ -49,8 +54,9 @@ for details. In Voigt notation one would use the vector
     # conversion from Voigt strain to 3x3 strain adds the ones on the diagonal
     f = v -> HF_energy(voigt_strain_to_full(v) * L)
     x = zeros(eltype(L), 6)
-    # Use chunk size of 1 to limit memory usage
-    config = ForwardDiff.GradientConfig(f, x, ForwardDiff.Chunk{1}())
+    # All 6 strains in one dual pass, so that the strained basis (in particular the nonlocal
+    # projectors of every k-point, then stored with 7 components) is built only once
+    config = ForwardDiff.GradientConfig(f, x, ForwardDiff.Chunk{6}())
     stress_voigt = 1/Ω * ForwardDiff.gradient(f, x, config)::Vector{eltype(L)}
     symmetrize_stresses(scfres.basis, voigt_stress_to_full(stress_voigt))
 end
