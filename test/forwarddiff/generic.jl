@@ -92,6 +92,28 @@ end
         @test ForwardDiffWrappers.tagged_derivative(g, 0.0) ≈ 2 * real(sum(A * B))
     end
 end
+@testitem "Matrix products with adjoint and transposed Dual matrices" #=
+    =#    tags=[:dont_test_mpi, :minimal] begin
+    using DFTK
+    using ForwardDiff
+    using LinearAlgebra
+
+    # The BLAS-dispatched product splits A (for A' and transpose(A): its parent) into value
+    # and partials; compare with the products of those parts as plain matrices.
+    Tg = ForwardDiff.Tag{typeof(sin), Float64}
+    dual(x) = ForwardDiff.Dual{Tg}(x, randn(), randn())
+    for T in (Float64, ComplexF64)
+        A = T <: Complex ? Complex.(dual.(randn(7, 4)), dual.(randn(7, 4))) : dual.(randn(7, 4))
+        B = randn(T, 7, 3)
+        for wrap in (adjoint, transpose)
+            C = wrap(A) * B
+            @test ForwardDiff.value.(C) ≈ wrap(ForwardDiff.value.(A)) * B
+            for p = 1:2
+                @test ForwardDiff.partials.(C, p) ≈ wrap(ForwardDiff.partials.(A, p)) * B
+            end
+        end
+    end
+end
 @testitem "Derivative of matrix functions with degenerate eigenvalues" #=
     =#    tags=[:dont_test_mpi, :minimal] setup=[ForwardDiffWrappers] begin
     using DFTK

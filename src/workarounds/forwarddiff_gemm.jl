@@ -16,6 +16,15 @@ const ScalingFactor = Union{Integer, Complex{<:Integer}, ScalarEltype}
 function dual_matrix_value_and_partials(A::AbstractMatrix{<:DualEltype{T,V,N}}, npartials::Int) where {T,V,N}
     (ForwardDiff.value.(A), ntuple(p -> ForwardDiff.partials.(A, p), npartials))
 end
+# Split the parent of an adjoint or transpose, which is contiguous in memory, and wrap the
+# parts again: value and partials of conj(z) are the conjugates of those of z.
+function dual_matrix_value_and_partials(A::Union{Adjoint{<:DualEltype{T,V,N}},
+                                                 Transpose{<:DualEltype{T,V,N}}},
+                                        npartials::Int) where {T,V,N}
+    wrap = A isa Adjoint ? adjoint : transpose
+    A_val, A_parts = dual_matrix_value_and_partials(parent(A), npartials)
+    (wrap(A_val), map(wrap, A_parts))
+end
 function dual_matrix_value_and_partials(A::AbstractMatrix, npartials::Int)
     (A, ntuple(_ -> nothing, npartials))
 end
